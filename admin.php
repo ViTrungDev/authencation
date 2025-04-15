@@ -14,38 +14,78 @@ if (isset($_POST['update_role'])) {
     $user_id = $_POST['user_id'];
     $new_role = $_POST['role'];
 
-    $allowed_roles = ['viewer', 'editor', 'admin'];
-    if (in_array($new_role, $allowed_roles)) {
-        $sql = "UPDATE users SET role = ? WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("si", $new_role, $user_id);
+    // Lấy thông tin người dùng
+    $check_sql = "SELECT username, role FROM users WHERE id = ?";
+    $check_stmt = $conn->prepare($check_sql);
+    $check_stmt->bind_param("i", $user_id);
+    $check_stmt->execute();
+    $check_result = $check_stmt->get_result();
 
-        if ($stmt->execute()) {
-            $success = "Cập nhật quyền thành công!";
+    if ($check_result->num_rows > 0) {
+        $user = $check_result->fetch_assoc();
+
+        // Nếu là root admin thì không cho chỉnh sửa
+        if ($user['username'] === 'root' && $user['role'] === 'admin') {
+            $error = "Không thể thay đổi quyền của người dùng hệ thống (root).";
         } else {
-            $error = "Lỗi khi cập nhật: " . $conn->error;
+            $allowed_roles = ['viewer', 'editor', 'admin'];
+            if (in_array($new_role, $allowed_roles)) {
+                $sql = "UPDATE users SET role = ? WHERE id = ?";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("si", $new_role, $user_id);
+
+                if ($stmt->execute()) {
+                    $success = "Cập nhật quyền thành công!";
+                } else {
+                    $error = "Lỗi khi cập nhật: " . $conn->error;
+                }
+                $stmt->close();
+            } else {
+                $error = "Quyền không hợp lệ!";
+            }
         }
-        $stmt->close();
     } else {
-        $error = "Quyền không hợp lệ!";
+        $error = "Không tìm thấy người dùng.";
     }
+
+    $check_stmt->close();
 }
+
 
 // Xác nhận thực hiện xóa
 if (isset($_POST['delete_user'])) {
     $user_id = $_POST['user_id'];
 
-    $sql = "DELETE FROM users WHERE id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $user_id);
+    // Lấy role của người dùng đó
+    $check_sql = "SELECT role FROM users WHERE id = ?";
+    $check_stmt = $conn->prepare($check_sql);
+    $check_stmt->bind_param("i", $user_id);
+    $check_stmt->execute();
+    $check_result = $check_stmt->get_result();
 
-    if ($stmt->execute()) {
-        $success = "Xóa người dùng thành công!";
+    if ($check_result->num_rows > 0) {
+        $row = $check_result->fetch_assoc();
+        if ($row['role'] === 'admin') {
+            $error = "Không thể xóa người dùng có vai trò Admin!";
+        } else {
+            $sql = "DELETE FROM users WHERE id = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $user_id);
+
+            if ($stmt->execute()) {
+                $success = "Xóa người dùng thành công!";
+            } else {
+                $error = "Lỗi khi xóa người dùng: " . $conn->error;
+            }
+            $stmt->close();
+        }
     } else {
-        $error = "Lỗi khi xóa người dùng: " . $conn->error;
+        $error = "Không tìm thấy người dùng.";
     }
-    $stmt->close();
+
+    $check_stmt->close();
 }
+
 
 // Lấy danh sách người dùng
 $sql = "SELECT id, username, email, role FROM users";
@@ -175,16 +215,21 @@ $result = $conn->query($sql);
                 <td><?= htmlspecialchars($user['email']); ?></td>
                 <td class="current-role"><?= htmlspecialchars($user['role']); ?></td>
                 <td>
-                    <form method="POST" style="display:inline;">
-                        <input type="hidden" name="user_id" value="<?= $user['id']; ?>">
-                        <select name="role">
-                            <option value="viewer" <?= $user['role'] == 'viewer' ? 'selected' : ''; ?>>Viewer</option>
-                            <option value="editor" <?= $user['role'] == 'editor' ? 'selected' : ''; ?>>Editor</option>
-                            <option value="admin" <?= $user['role'] == 'admin' ? 'selected' : ''; ?>>Admin</option>
-                        </select>
-                        <button type="submit" name="update_role">Cập nhật</button>
-                    </form>
+                    <?php if ($user['username'] === 'root' && $user['role'] === 'admin'): ?>
+                        <em>Không thể sửa</em>
+                    <?php else: ?>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="user_id" value="<?= $user['id']; ?>">
+                            <select name="role">
+                                <option value="viewer" <?= $user['role'] == 'viewer' ? 'selected' : ''; ?>>Viewer</option>
+                                <option value="editor" <?= $user['role'] == 'editor' ? 'selected' : ''; ?>>Editor</option>
+                                <option value="admin" <?= $user['role'] == 'admin' ? 'selected' : ''; ?>>Admin</option>
+                            </select>
+                            <button type="submit" name="update_role">Cập nhật</button>
+                        </form>
+                    <?php endif; ?>
                 </td>
+
                 <td>
                     <!-- Nút mở modal -->
                     <button type="button" class="delete-button" onclick="showModal(<?= $user['id']; ?>)">Xóa</button>
